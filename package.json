@@ -1,0 +1,14 @@
+{
+  "name": "discord-lowserver-api",
+  "version": "1.1.0",
+  "description": "Discord bot sunucu üye sayısı kontrol API (Vercel uyumlu, whitelist destekli)",
+  "main": "api/lowservers.js",
+  "type": "module",
+  "scripts": {
+    "start": "node api/lowservers.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}
