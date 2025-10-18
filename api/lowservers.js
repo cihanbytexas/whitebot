@@ -1,21 +1,42 @@
 // api/lowservers.js
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Küçük delay fonksiyonu (rate-limit için)
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Only POST requests are allowed." });
   }
 
-  try {
-    const { bot_token, user_count, custom_message, whitelist = [] } = req.body;
+  let body = req.body;
 
-    if (!bot_token || typeof user_count !== "number" || !custom_message) {
-      return res.status(400).json({
-        error: "Missing bot_token, user_count (number) or custom_message.",
-      });
+  // BDFD tırnaksız veya JS stili JSON gönderiyorsa eval ile parse et
+  if (typeof body === "string") {
+    try {
+      body = eval("(" + body + ")");
+    } catch (err) {
+      return res.status(400).json({ error: "Invalid BDFD JSON format." });
     }
+  }
 
-    // Botun tüm sunucularını çek
+  const { bot_token, user_count, custom_message } = body;
+
+  // Whitelist virgülle ayrılmış stringten diziye çevir
+  let whitelist = [];
+  if (body.whitelist) {
+    whitelist = body.whitelist
+      .split(",")
+      .map((x) => x.trim());
+  }
+
+  if (!bot_token || typeof user_count !== "number" || !custom_message) {
+    return res.status(400).json({
+      error: "Missing bot_token, user_count (number) or custom_message.",
+    });
+  }
+
+  try {
+    // Botun bulunduğu sunucular
     const guildsResp = await fetch("https://discord.com/api/v10/users/@me/guilds", {
       headers: { Authorization: `Bot ${bot_token}` },
     });
@@ -33,34 +54,36 @@ export default async function handler(req, res) {
     const leftGuilds = [];
     const skippedGuilds = [];
 
-    // Her sunucu için üye sayısını kontrol et
+    // Sunucuların üye sayısını kontrol et
     for (const g of guilds) {
       try {
+        // Sunucu bilgisi
         const infoResp = await fetch(
           `https://discord.com/api/v10/guilds/${g.id}?with_counts=true`,
           { headers: { Authorization: `Bot ${bot_token}` } }
         );
 
         if (!infoResp.ok) continue;
+
         const info = await infoResp.json();
         const memberCount = info.approximate_member_count ?? info.member_count ?? 0;
 
-        // Whitelist'te varsa atla
+        // Whitelist kontrolü
         if (whitelist.includes(g.id)) {
           skippedGuilds.push(`${g.name} (${g.id})`);
           continue;
         }
 
-        // Belirlenen limitin altındaysa çıkılacak
+        // Üye sayısı limitin altındaysa çıkılacak
         if (memberCount < user_count) {
           toLeave.push({ id: g.id, name: g.name, memberCount });
         }
       } catch (err) {
-        console.error(`Error fetching ${g.id}:`, err);
+        console.error(`Error fetching guild ${g.id}:`, err);
       }
     }
 
-    // Çıkış işlemleri
+    // Çıkış işlemleri (mesaj gönder + sunucudan çık)
     for (const guild of toLeave) {
       try {
         const channelsResp = await fetch(
@@ -70,6 +93,7 @@ export default async function handler(req, res) {
 
         if (channelsResp.ok) {
           const channels = await channelsResp.json();
+          // İlk erişilebilir metin kanalı
           const textChannel = channels.find((c) => c.type === 0);
 
           if (textChannel) {
@@ -87,8 +111,10 @@ export default async function handler(req, res) {
           }
         }
 
-        await delay(1000); // Rate limit önlemi
+        // Rate-limit önleme
+        await delay(1000);
 
+        // Sunucudan çık
         await fetch(
           `https://discord.com/api/v10/users/@me/guilds/${guild.id}`,
           {
